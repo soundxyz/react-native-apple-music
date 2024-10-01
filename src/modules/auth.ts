@@ -26,9 +26,9 @@ class Auth {
 
   /**
    * Get music user token
-   * @returns {Promise<string>} A promise that resolves to the music user token.
+   * @returns {Promise<string | null>} A promise that resolves to the music user token.
    */
-  public static getMusicUserToken(): Promise<string> {
+  public static getMusicUserToken(): Promise<string | null> {
     return new Promise((res, rej) => {
       if (
         this.musicUserToken != null &&
@@ -40,8 +40,11 @@ class Auth {
       }
 
       try {
-        MusicModule.musicUserToken((token: string) => {
-          this.musicUserToken = { token, lastFetched: new Date() };
+        MusicModule.musicUserToken((token: string | null) => {
+          if (token) {
+            this.musicUserToken = { token, lastFetched: new Date() };
+          }
+
           res(token);
         });
       } catch (error) {
