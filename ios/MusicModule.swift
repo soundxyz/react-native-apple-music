@@ -277,7 +277,8 @@ class MusicModule: RCTEventEmitter {
 
     @objc(authorization:)
     func authorization(_ callback: @escaping RCTResponseSenderBlock) {
-        MusicAuthorization.request { (status) in
+        Task {
+            let status = await MusicAuthorization.request()
             switch status {
             case .authorized:
                 callback(["authorized"])
@@ -293,12 +294,15 @@ class MusicModule: RCTEventEmitter {
         }
     }
 
-    @objc(musicUserToken:devToken:)
+    @objc(musicUserToken:)
     func musicUserToken(
-        devToken: String, _ callback: @escaping RCTResponseSenderBlock
+        _ callback: @escaping RCTResponseSenderBlock
     ) {
         Task {
             do {
+                let devToken: String = try await MusicDataRequest.tokenProvider.developerToken(
+                    options: MusicTokenRequestOptions.ignoreCache
+                )
                 let token: String = try await MusicDataRequest.tokenProvider.userToken(
                     for: devToken,
                     options: MusicTokenRequestOptions.ignoreCache
@@ -310,24 +314,6 @@ class MusicModule: RCTEventEmitter {
             }
 
         }
-    }
-
-    @objc(developerToken:)
-    func developerToken(
-        _ callback: @escaping RCTResponseSenderBlock
-    ) {
-        Task {
-            do {
-                let token: String = try await MusicDataRequest.tokenProvider.developerToken(
-                    options: MusicTokenRequestOptions.ignoreCache
-                )
-                callback([token])
-            } catch {
-                print("Error getting developer token: \(error)")
-                callback([nil])
-            }
-        }
-
     }
 
     func convertSongToDictionary(_ song: Song) -> [String: Any] {

@@ -2,4 +2,4 @@
 **/lib/*
 *.ejs
 
-ios/*
+ios/*.m
