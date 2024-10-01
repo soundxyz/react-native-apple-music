@@ -1,6 +1,5 @@
 // MusicModule.m
 
-//
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
 
@@ -10,9 +9,7 @@ RCT_EXTERN_METHOD(authorization:(RCTResponseSenderBlock)callback)
 
 RCT_EXTERN_METHOD(checkSubscription:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(developerToken:(RCTResponseSenderBlock)callback)
-
-RCT_EXTERN_METHOD(musicUserToken:devToken:(NSString *)devToken (RCTResponseSenderBlock)callback)
+RCT_EXTERN_METHOD(musicUserToken:(RCTResponseSenderBlock)callback)
 
 RCT_EXTERN_METHOD(catalogSearch:(NSString *)term types:(NSArray<NSString *> *)types options:(NSDictionary *)options resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 
