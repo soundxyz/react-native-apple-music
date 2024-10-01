@@ -1,321 +1,361 @@
+import Combine
 // MusicModule.swift
 import Foundation
+import MusicKit
 import React
 import StoreKit
-import MusicKit
-import Combine
 
 @available(iOS 15.0, *)
 @objc(MusicModule)
 class MusicModule: RCTEventEmitter {
 
-  private var queueObservation: AnyCancellable?
-  private var stateObservation: AnyCancellable?
-  private var currentPlaybackStatus: MusicPlayer.PlaybackStatus?
-  private var lastReportedPlaybackStatus: MusicPlayer.PlaybackStatus?
+    private var queueObservation: AnyCancellable?
+    private var stateObservation: AnyCancellable?
+    private var currentPlaybackStatus: MusicPlayer.PlaybackStatus?
+    private var lastReportedPlaybackStatus: MusicPlayer.PlaybackStatus?
 
-  override init() {
-      super.init()
-      startObservingPlaybackState()
-      startObservingQueueChanges()
-  }
-
-  override func supportedEvents() -> [String]! {
-      return ["onPlaybackStateChange", "onCurrentSongChange"]
-  }
-
-  private func startObservingPlaybackState() {
-    stateObservation = SystemMusicPlayer.shared.state.objectWillChange.sink { [weak self] _ in
-      self?.sendPlaybackStateUpdate()
+    override init() {
+        super.init()
+        startObservingPlaybackState()
+        startObservingQueueChanges()
     }
-  }
 
-  private func startObservingQueueChanges() {
-          queueObservation = SystemMusicPlayer.shared.queue.objectWillChange.sink { [weak self] _ in
-              self?.sendCurrentSongUpdate()
-          }
-      }
+    override func supportedEvents() -> [String]! {
+        return ["onPlaybackStateChange", "onCurrentSongChange"]
+    }
 
-  private func sendCurrentSongUpdate() {
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-          guard let self = self else { return }
+    private func startObservingPlaybackState() {
+        stateObservation = SystemMusicPlayer.shared.state.objectWillChange.sink { [weak self] _ in
+            self?.sendPlaybackStateUpdate()
+        }
+    }
 
-          self.getCurrentSongInfo { songInfo in
-              if let songInfo = songInfo {
-                  self.sendEvent(withName: "onCurrentSongChange", body: ["currentSong": songInfo])
-              }
-          }
-      }
-  }
+    private func startObservingQueueChanges() {
+        queueObservation = SystemMusicPlayer.shared.queue.objectWillChange.sink { [weak self] _ in
+            self?.sendCurrentSongUpdate()
+        }
+    }
 
-  private func sendPlaybackStateUpdate() {
-      let state = SystemMusicPlayer.shared.state
-      let playbackTime = SystemMusicPlayer.shared.playbackTime
-      let playbackStatusDescription = describePlaybackStatus(state.playbackStatus)
-      let playbackRate = state.playbackRate
+    private func sendCurrentSongUpdate() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self = self else { return }
 
-      if lastReportedPlaybackStatus != state.playbackStatus {
-          self.getCurrentSongInfo { songInfo in
-              var playbackInfo: [String: Any] = [
-                  "playbackRate": playbackRate,
-                  "playbackStatus": playbackStatusDescription,
-                  "playbackTime": playbackTime
-              ]
+            self.getCurrentSongInfo { songInfo in
+                if let songInfo = songInfo {
+                    self.sendEvent(withName: "onCurrentSongChange", body: ["currentSong": songInfo])
+                }
+            }
+        }
+    }
 
-              if let songInfo = songInfo {
-                  playbackInfo["currentSong"] = songInfo
-              }
+    private func sendPlaybackStateUpdate() {
+        let state = SystemMusicPlayer.shared.state
+        let playbackTime = SystemMusicPlayer.shared.playbackTime
+        let playbackStatusDescription = describePlaybackStatus(state.playbackStatus)
+        let playbackRate = state.playbackRate
 
-              self.sendEvent(withName: "onPlaybackStateChange", body: playbackInfo)
-          }
+        if lastReportedPlaybackStatus != state.playbackStatus {
+            self.getCurrentSongInfo { songInfo in
+                var playbackInfo: [String: Any] = [
+                    "playbackRate": playbackRate,
+                    "playbackStatus": playbackStatusDescription,
+                    "playbackTime": playbackTime,
+                ]
 
-          lastReportedPlaybackStatus = state.playbackStatus
-      }
-  }
+                if let songInfo = songInfo {
+                    playbackInfo["currentSong"] = songInfo
+                }
 
-  @objc(getCurrentState:)
-  func getCurrentState(_ callback: @escaping RCTResponseSenderBlock) {
-      let state = SystemMusicPlayer.shared.state
-      let playbackTime = SystemMusicPlayer.shared.playbackTime
-      let playbackStatusDescription = describePlaybackStatus(state.playbackStatus)
-      let playbackRate = state.playbackRate
+                self.sendEvent(withName: "onPlaybackStateChange", body: playbackInfo)
+            }
 
-      self.getCurrentSongInfo { songInfo in
-          var currentState: [String: Any] = [
-              "playbackRate": playbackRate,
-              "playbackStatus": playbackStatusDescription,
-              "playbackTime": playbackTime
-          ]
+            lastReportedPlaybackStatus = state.playbackStatus
+        }
+    }
 
-          if let songInfo = songInfo {
-              currentState["currentSong"] = songInfo
-          }
+    @objc(getCurrentState:)
+    func getCurrentState(_ callback: @escaping RCTResponseSenderBlock) {
+        let state = SystemMusicPlayer.shared.state
+        let playbackTime = SystemMusicPlayer.shared.playbackTime
+        let playbackStatusDescription = describePlaybackStatus(state.playbackStatus)
+        let playbackRate = state.playbackRate
 
-          callback([currentState])
-      }
-  }
+        self.getCurrentSongInfo { songInfo in
+            var currentState: [String: Any] = [
+                "playbackRate": playbackRate,
+                "playbackStatus": playbackStatusDescription,
+                "playbackTime": playbackTime,
+            ]
 
-  private func getCurrentSongInfo(completion: @escaping ([String: Any]?) -> Void) {
-      guard let currentEntry = SystemMusicPlayer.shared.queue.currentEntry else {
-          print("No current entry in the playback queue")
-          completion(nil)
-          return
-      }
+            if let songInfo = songInfo {
+                currentState["currentSong"] = songInfo
+            }
 
+            callback([currentState])
+        }
+    }
 
-      switch currentEntry.item {
-      case .song(let song):
-          Task {
-              let songID = song.id
-              let request = MusicCatalogResourceRequest<Song>(matching: \.id, equalTo: songID)
-              do {
-                  let response = try await request.response()
-                  if let foundSong = response.items.first {
-                      let songInfo = self.convertSongToDictionary(foundSong)
-                      DispatchQueue.main.async {
-                          completion(songInfo)
-                      }
-                  } else {
-                      print("Song not found in the response.")
-                      DispatchQueue.main.async {
-                          completion(nil)
-                      }
-                  }
-              } catch {
-                  print("Error requesting song: \(error)")
-                  DispatchQueue.main.async {
-                      completion(nil)
-                  }
-              }
-          }
-
-      case .musicVideo(let musicVideo):
-          Task {
-              print("The current item is a music video: \(musicVideo.title)")
-
-              let request = MusicCatalogResourceRequest<MusicVideo>(matching: \.id, equalTo: musicVideo.id)
-              do {
-                  let response = try await request.response()
-                  if let foundMusicVideo = response.items.first {
-                      if #available(iOS 16.0, *) {
-                          let songInfo = self.convertMusicVideosToDictionary(foundMusicVideo)
-                          DispatchQueue.main.async {
-                              completion(songInfo)
-                          }
-                      } else {
-                          print("Update your IOS version to 16.0>")
-                          DispatchQueue.main.async {
-                              completion(nil)
-                          }
-                      }
-                  } else {
-                      print("Music video not found in the response.")
-                      DispatchQueue.main.async {
-                          completion(nil)
-                      }
-                  }
-              } catch {
-                  print("Error requesting music video: \(error)")
-                  DispatchQueue.main.async {
-                      completion(nil)
-                  }
-              }
-          }
-
-      case .some(let some):
-          print("The current item is some item:\(some.id)")
-          completion(nil)
-
-      default:
-          print("The current item is neither a song nor a music video")
-          completion(nil)
-      }
-  }
-
-
-  private func describePlaybackStatus(_ status: MusicPlayer.PlaybackStatus) -> String {
-          switch status {
-          case .playing:
-              return "playing"
-          case .paused:
-              return "paused"
-          case .stopped:
-              return "stopped"
-          case .interrupted:
-              return "interrupted"
-          case .seekingForward:
-              return "seekingForward"
-          case .seekingBackward:
-              return "seekingBackward"
-          default:
-              return "unknown"
-          }
-      }
-
-  @objc
-  static override func requiresMainQueueSetup() -> Bool {
-    return false
-  }
-
-  @objc(checkSubscription:rejecter:)
-    func checkSubscription(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-      SKCloudServiceController().requestCapabilities { (capabilities, error) in
-        if let error = error {
-          reject("ERROR", "Failed to get subscription details: \(error)", error)
-          return
+    private func getCurrentSongInfo(completion: @escaping ([String: Any]?) -> Void) {
+        guard let currentEntry = SystemMusicPlayer.shared.queue.currentEntry else {
+            print("No current entry in the playback queue")
+            completion(nil)
+            return
         }
 
-        let canPlayCatalogContent = capabilities.contains(.musicCatalogPlayback)
-        let hasCloudLibraryEnabled = capabilities.contains(.addToCloudMusicLibrary)
-        let isMusicCatalogSubscriptionEligible = capabilities.contains(.musicCatalogSubscriptionEligible)
+        switch currentEntry.item {
+        case .song(let song):
+            Task {
+                let songID = song.id
+                let request = MusicCatalogResourceRequest<Song>(matching: \.id, equalTo: songID)
+                do {
+                    let response = try await request.response()
+                    if let foundSong = response.items.first {
+                        let songInfo = self.convertSongToDictionary(foundSong)
+                        DispatchQueue.main.async {
+                            completion(songInfo)
+                        }
+                    } else {
+                        print("Song not found in the response.")
+                        DispatchQueue.main.async {
+                            completion(nil)
+                        }
+                    }
+                } catch {
+                    print("Error requesting song: \(error)")
+                    DispatchQueue.main.async {
+                        completion(nil)
+                    }
+                }
+            }
 
-        let subscriptionDetails: [String: Any] = [
-            "canPlayCatalogContent": canPlayCatalogContent,
-            "hasCloudLibraryEnabled": hasCloudLibraryEnabled,
-            "isMusicCatalogSubscriptionEligible": isMusicCatalogSubscriptionEligible
+        case .musicVideo(let musicVideo):
+            Task {
+                print("The current item is a music video: \(musicVideo.title)")
+
+                let request = MusicCatalogResourceRequest<MusicVideo>(
+                    matching: \.id, equalTo: musicVideo.id)
+                do {
+                    let response = try await request.response()
+                    if let foundMusicVideo = response.items.first {
+                        if #available(iOS 16.0, *) {
+                            let songInfo = self.convertMusicVideosToDictionary(foundMusicVideo)
+                            DispatchQueue.main.async {
+                                completion(songInfo)
+                            }
+                        } else {
+                            print("Update your IOS version to 16.0>")
+                            DispatchQueue.main.async {
+                                completion(nil)
+                            }
+                        }
+                    } else {
+                        print("Music video not found in the response.")
+                        DispatchQueue.main.async {
+                            completion(nil)
+                        }
+                    }
+                } catch {
+                    print("Error requesting music video: \(error)")
+                    DispatchQueue.main.async {
+                        completion(nil)
+                    }
+                }
+            }
+
+        case .some(let some):
+            print("The current item is some item:\(some.id)")
+            completion(nil)
+
+        default:
+            print("The current item is neither a song nor a music video")
+            completion(nil)
+        }
+    }
+
+    private func describePlaybackStatus(_ status: MusicPlayer.PlaybackStatus) -> String {
+        switch status {
+        case .playing:
+            return "playing"
+        case .paused:
+            return "paused"
+        case .stopped:
+            return "stopped"
+        case .interrupted:
+            return "interrupted"
+        case .seekingForward:
+            return "seekingForward"
+        case .seekingBackward:
+            return "seekingBackward"
+        default:
+            return "unknown"
+        }
+    }
+
+    @objc
+    static override func requiresMainQueueSetup() -> Bool {
+        return false
+    }
+
+    @objc(checkSubscription:rejecter:)
+    func checkSubscription(
+        _ resolve: @escaping RCTPromiseResolveBlock,
+        rejecter reject: @escaping RCTPromiseRejectBlock
+    ) {
+        SKCloudServiceController().requestCapabilities { (capabilities, error) in
+            if let error = error {
+                reject("ERROR", "Failed to get subscription details: \(error)", error)
+                return
+            }
+
+            let canPlayCatalogContent = capabilities.contains(.musicCatalogPlayback)
+            let hasCloudLibraryEnabled = capabilities.contains(.addToCloudMusicLibrary)
+            let isMusicCatalogSubscriptionEligible = capabilities.contains(
+                .musicCatalogSubscriptionEligible)
+
+            let subscriptionDetails: [String: Any] = [
+                "canPlayCatalogContent": canPlayCatalogContent,
+                "hasCloudLibraryEnabled": hasCloudLibraryEnabled,
+                "isMusicCatalogSubscriptionEligible": isMusicCatalogSubscriptionEligible,
+            ]
+
+            resolve(subscriptionDetails)
+        }
+    }
+
+    @objc(togglePlayerState)
+    func togglePlayerState() {
+        let playbackState = SystemMusicPlayer.shared.state.playbackStatus
+
+        switch playbackState {
+        case .playing:
+            SystemMusicPlayer.shared.pause()
+        case .paused, .stopped, .interrupted:
+            Task {
+                do {
+                    try await SystemMusicPlayer.shared.play()
+                } catch {
+                    print("Error attempting to play music: \(error)")
+                }
+            }
+        default:
+            Task {
+                do {
+                    try await SystemMusicPlayer.shared.play()
+                } catch {
+                    print("Error attempting to play music: \(error)")
+                }
+            }
+        }
+    }
+
+    @objc(play)
+    func play() {
+        Task {
+            do {
+                try await SystemMusicPlayer.shared.play()
+            } catch {
+                print("Play failed: \(error)")
+            }
+        }
+    }
+
+    @objc(pause)
+    func pause() {
+        SystemMusicPlayer.shared.pause()
+    }
+
+    @objc(skipToNextEntry)
+    func skipToNextEntry() {
+        Task {
+            do {
+                try await SystemMusicPlayer.shared.skipToNextEntry()
+            } catch {
+                print("Next failed: \(error)")
+            }
+        }
+    }
+
+    @objc(authorization:)
+    func authorization(_ callback: @escaping RCTResponseSenderBlock) {
+        MusicAuthorization.request { (status) in
+            switch status {
+            case .authorized:
+                callback(["authorized"])
+            case .denied:
+                callback(["denied"])
+            case .notDetermined:
+                callback(["notDetermined"])
+            case .restricted:
+                callback(["restricted"])
+            @unknown default:
+                callback(["unknown"])
+            }
+        }
+    }
+
+    @objc(musicUserToken:devToken:)
+    func musicUserToken(
+        devToken: String, _ callback: @escaping RCTResponseSenderBlock
+    ) {
+        Task {
+            do {
+                let token: String = try await MusicDataRequest.tokenProvider.userToken(
+                    for: devToken,
+                    options: MusicTokenRequestOptions.ignoreCache
+                )
+                callback([token])
+            } catch {
+                print("Error getting music user token: \(error)")
+                callback([nil])
+            }
+
+        }
+    }
+
+    @objc(developerToken:)
+    func developerToken(
+        _ callback: @escaping RCTResponseSenderBlock
+    ) {
+        Task {
+            do {
+                let token: String = try await MusicDataRequest.tokenProvider.developerToken(
+                    options: MusicTokenRequestOptions.ignoreCache
+                )
+                callback([token])
+            } catch {
+                print("Error getting developer token: \(error)")
+                callback([nil])
+            }
+        }
+
+    }
+
+    func convertSongToDictionary(_ song: Song) -> [String: Any] {
+        var artworkUrlString: String = ""
+
+        if let artwork = song.artwork {
+            let artworkUrl = artwork.url(width: 200, height: 200)
+
+            if let url = artworkUrl, url.scheme == "musicKit" {
+                print("Artwork URL is a MusicKit URL, may not be directly accessible: \(url)")
+            } else {
+                artworkUrlString = artworkUrl?.absoluteString ?? ""
+            }
+        }
+
+        return [
+            "id": String(describing: song.id),
+            "title": song.title,
+            "artistName": song.artistName,
+            "artworkUrl": artworkUrlString,
+            "duration": String(song.duration ?? 0),
         ]
-
-        resolve(subscriptionDetails)
-      }
     }
 
-  @objc(togglePlayerState)
-  func togglePlayerState() {
-      let playbackState = SystemMusicPlayer.shared.state.playbackStatus
+    func convertAlbumToDictionary(_ album: Album) -> [String: Any] {
+        var artworkUrlString: String = ""
 
-      switch playbackState {
-      case .playing:
-          SystemMusicPlayer.shared.pause()
-      case .paused, .stopped, .interrupted:
-          Task {
-              do {
-                  try await SystemMusicPlayer.shared.play()
-              } catch {
-                  print("Error attempting to play music: \(error)")
-              }
-          }
-      default:
-          Task {
-              do {
-                  try await SystemMusicPlayer.shared.play()
-              } catch {
-                  print("Error attempting to play music: \(error)")
-              }
-          }
-      }
-  }
-
-  @objc(play)
-      func play() {
-          Task {
-              do {
-                  try await SystemMusicPlayer.shared.play()
-              } catch {
-                  print("Play failed: \(error)")
-              }
-          }
-      }
-
-  @objc(pause)
-  func pause() {
-      SystemMusicPlayer.shared.pause()
-  }
-
-  @objc(skipToNextEntry)
-      func skipToNextEntry() {
-          Task {
-              do {
-                  try await SystemMusicPlayer.shared.skipToNextEntry()
-              } catch {
-                  print("Next failed: \(error)")
-              }
-          }
-      }
-
-  @objc(authorization:)
-  func authorization(_ callback: @escaping RCTResponseSenderBlock) {
-    SKCloudServiceController.requestAuthorization { (status) in
-      switch status {
-      case .authorized:
-        callback(["authorized"])
-      case .denied:
-        callback(["denied"])
-      case .notDetermined:
-        callback(["notDetermined"])
-      case .restricted:
-        callback(["restricted"])
-      @unknown default:
-        callback(["unknown"])
-      }
-    }
-  }
-
-  func convertSongToDictionary(_ song: Song) -> [String: Any] {
-      var artworkUrlString: String = ""
-
-      if let artwork = song.artwork {
-          let artworkUrl = artwork.url(width: 200, height: 200)
-
-          if let url = artworkUrl, url.scheme == "musicKit" {
-              print("Artwork URL is a MusicKit URL, may not be directly accessible: \(url)")
-          } else {
-              artworkUrlString = artworkUrl?.absoluteString ?? ""
-          }
-      }
-
-      return [
-          "id": String(describing: song.id),
-          "title": song.title,
-          "artistName": song.artistName,
-          "artworkUrl": artworkUrlString,
-          "duration": String(song.duration ?? 0)
-      ]
-  }
-
-  func convertAlbumToDictionary(_ album: Album) -> [String: Any] {
-       var artworkUrlString: String = ""
-
-       if let artwork = album.artwork {
+        if let artwork = album.artwork {
             let artworkUrl = artwork.url(width: 200, height: 200)
 
             if let url = artworkUrl, url.scheme == "musicKit" {
@@ -330,113 +370,122 @@ class MusicModule: RCTEventEmitter {
             "title": album.title,
             "artistName": album.artistName,
             "artworkUrl": artworkUrlString,
-            "trackCount": String(album.trackCount)
+            "trackCount": String(album.trackCount),
         ]
     }
 
     @available(iOS 16.0, *)
     func convertMusicItemsToDictionary(_ track: RecentlyPlayedMusicItem) -> [String: Any] {
-            var resultCollection: [String: Any] = [
-                "id": String(describing: track.id),
-                "title": track.title,
-                "subtitle": String(describing: track.subtitle ?? "")
-            ]
+        var resultCollection: [String: Any] = [
+            "id": String(describing: track.id),
+            "title": track.title,
+            "subtitle": String(describing: track.subtitle ?? ""),
+        ]
 
-            switch track {
-            case .album:
-                resultCollection["type"] = "album"
-                break
-            case .playlist:
-                resultCollection["type"] = "playlist"
-                break
-            case .station:
-                resultCollection["type"] = "station"
-                break
-            default:
-                resultCollection["type"] = "unknown"
-            }
-
-            return resultCollection
+        switch track {
+        case .album:
+            resultCollection["type"] = "album"
+            break
+        case .playlist:
+            resultCollection["type"] = "playlist"
+            break
+        case .station:
+            resultCollection["type"] = "station"
+            break
+        default:
+            resultCollection["type"] = "unknown"
         }
 
-  @available(iOS 16.0, *)
-  func convertMusicVideosToDictionary(_ musicVideo: MusicVideo) -> [String: Any] {
-      var artworkUrlString: String = ""
-
-      if let artwork = musicVideo.artwork {
-            let artworkUrl = artwork.url(width: 200, height: 200)
-
-             if let url = artworkUrl, url.scheme == "musicKit" {
-                 print("Artwork URL is a MusicKit URL, may not be directly accessible: \(url)")
-             } else {
-                 artworkUrlString = artworkUrl?.absoluteString ?? ""
-             }
-         }
-
-         return [
-             "id": String(describing: musicVideo.id),
-             "title": musicVideo.title,
-             "artistName": musicVideo.artistName,
-             "artworkUrl": artworkUrlString,
-             "duration": musicVideo.duration!
-         ]
+        return resultCollection
     }
 
+    @available(iOS 16.0, *)
+    func convertMusicVideosToDictionary(_ musicVideo: MusicVideo) -> [String: Any] {
+        var artworkUrlString: String = ""
 
-  @objc(catalogSearch:types:options:resolver:rejecter:)
-  func catalogSearch(_ term: String, types: [String], options: NSDictionary, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-      Task {
-          let searchTypes = types.compactMap { typeString -> MusicCatalogSearchable.Type? in
-              switch typeString {
-              case "songs":
-                  return Song.self
-              case "albums":
-                  return Album.self
-              default:
-                  return nil
-              }
-          }
+        if let artwork = musicVideo.artwork {
+            let artworkUrl = artwork.url(width: 200, height: 200)
 
-          let limit = options["limit"] as? Int ?? 25
-          let offset = options["offset"] as? Int ?? 0
+            if let url = artworkUrl, url.scheme == "musicKit" {
+                print("Artwork URL is a MusicKit URL, may not be directly accessible: \(url)")
+            } else {
+                artworkUrlString = artworkUrl?.absoluteString ?? ""
+            }
+        }
 
-          var request = MusicCatalogSearchRequest(term: term, types: searchTypes)
-          request.limit = limit
-          request.offset = offset
+        return [
+            "id": String(describing: musicVideo.id),
+            "title": musicVideo.title,
+            "artistName": musicVideo.artistName,
+            "artworkUrl": artworkUrlString,
+            "duration": musicVideo.duration!,
+        ]
+    }
 
-          do {
-              let response = try await request.response()
-              print("Response received: \(response)")
+    @objc(catalogSearch:types:options:resolver:rejecter:)
+    func catalogSearch(
+        _ term: String, types: [String], options: NSDictionary,
+        resolver resolve: @escaping RCTPromiseResolveBlock,
+        rejecter reject: @escaping RCTPromiseRejectBlock
+    ) {
+        Task {
+            let searchTypes = types.compactMap { typeString -> MusicCatalogSearchable.Type? in
+                switch typeString {
+                case "songs":
+                    return Song.self
+                case "albums":
+                    return Album.self
+                default:
+                    return nil
+                }
+            }
 
-              let songs = response.songs.compactMap(convertSongToDictionary)
-              let albums = response.albums.compactMap(convertAlbumToDictionary)
+            let limit = options["limit"] as? Int ?? 25
+            let offset = options["offset"] as? Int ?? 0
 
-              resolve(["songs": songs, "albums": albums])
-          } catch {
-              reject("ERROR", "Failed to perform catalog search: \(error)", error)
-          }
-      }
-}
+            var request = MusicCatalogSearchRequest(term: term, types: searchTypes)
+            request.limit = limit
+            request.offset = offset
+
+            do {
+                let response = try await request.response()
+                print("Response received: \(response)")
+
+                let songs = response.songs.compactMap(convertSongToDictionary)
+                let albums = response.albums.compactMap(convertAlbumToDictionary)
+
+                resolve(["songs": songs, "albums": albums])
+            } catch {
+                reject("ERROR", "Failed to perform catalog search: \(error)", error)
+            }
+        }
+    }
 
     @available(iOS 16.0, *)
     @objc(getTracksFromLibrary:rejecter:)
-    func getTracksFromLibrary(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    func getTracksFromLibrary(
+        _ resolve: @escaping RCTPromiseResolveBlock,
+        rejecter reject: @escaping RCTPromiseRejectBlock
+    ) {
         Task {
-                do {
-                    let request = MusicRecentlyPlayedContainerRequest()
-                    let response = try await request.response()
+            do {
+                let request = MusicRecentlyPlayedContainerRequest()
+                let response = try await request.response()
 
-                    let tracks = response.items.compactMap(convertMusicItemsToDictionary)
+                let tracks = response.items.compactMap(convertMusicItemsToDictionary)
 
-                    resolve(["recentlyPlayedItems": tracks])
-                } catch {
-                    reject("ERROR", "Failed to get recently played tracks: \(error)", error)
-                }
+                resolve(["recentlyPlayedItems": tracks])
+            } catch {
+                reject("ERROR", "Failed to get recently played tracks: \(error)", error)
+            }
         }
     }
 
     @objc(setPlaybackQueue:type:resolver:rejecter:)
-    func setPlaybackQueue(_ itemId: String, type: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    func setPlaybackQueue(
+        _ itemId: String, type: String, resolver resolve: @escaping RCTPromiseResolveBlock,
+        rejecter reject: @escaping RCTPromiseRejectBlock
+    ) {
         Task {
             do {
                 let musicItemId = MusicItemID.init(itemId)
@@ -451,7 +500,8 @@ class MusicModule: RCTEventEmitter {
 
                         let player = SystemMusicPlayer.shared
 
-                        player.queue = [tracksToBeAdded] /// <- directly add items to the queue
+                        player.queue = [tracksToBeAdded]
+                        /// <- directly add items to the queue
 
                         try await player.prepareToPlay()
 
@@ -467,7 +517,8 @@ class MusicModule: RCTEventEmitter {
 
                         let player = SystemMusicPlayer.shared
 
-                        player.queue = [tracksToBeAdded] /// <- directly add items to the queue
+                        player.queue = [tracksToBeAdded]
+                        /// <- directly add items to the queue
 
                         try await player.prepareToPlay()
 
@@ -483,7 +534,8 @@ class MusicModule: RCTEventEmitter {
 
                         let player = SystemMusicPlayer.shared
 
-                        player.queue = [tracksToBeAdded] /// <- directly add items to the queue
+                        player.queue = [tracksToBeAdded]
+                        /// <- directly add items to the queue
 
                         try await player.prepareToPlay()
 
@@ -499,7 +551,8 @@ class MusicModule: RCTEventEmitter {
 
                         let player = SystemMusicPlayer.shared
 
-                        player.queue = [tracksToBeAdded] /// <- directly add items to the queue
+                        player.queue = [tracksToBeAdded]
+                        /// <- directly add items to the queue
 
                         try await player.prepareToPlay()
 
@@ -513,9 +566,9 @@ class MusicModule: RCTEventEmitter {
 
                     return
                 }
-               } catch {
-                 reject("ERROR", "Failed to set tracks to queue: \(error)", error)
-               }
+            } catch {
+                reject("ERROR", "Failed to set tracks to queue: \(error)", error)
+            }
         }
     }
 
@@ -528,13 +581,17 @@ class MusicModule: RCTEventEmitter {
         static func getRequest(forType type: String, musicItemId: MusicItemID) -> MediaType? {
             switch type {
             case "song":
-                return .song(MusicCatalogResourceRequest<Song>(matching: \.id, equalTo: musicItemId))
+                return .song(
+                    MusicCatalogResourceRequest<Song>(matching: \.id, equalTo: musicItemId))
             case "album":
-                return .album(MusicCatalogResourceRequest<Album>(matching: \.id, equalTo: musicItemId))
+                return .album(
+                    MusicCatalogResourceRequest<Album>(matching: \.id, equalTo: musicItemId))
             case "playlist":
-                return .playlist(MusicCatalogResourceRequest<Playlist>(matching: \.id, equalTo: musicItemId))
+                return .playlist(
+                    MusicCatalogResourceRequest<Playlist>(matching: \.id, equalTo: musicItemId))
             case "station":
-                return .station(MusicCatalogResourceRequest<Station>(matching: \.id, equalTo: musicItemId))
+                return .station(
+                    MusicCatalogResourceRequest<Station>(matching: \.id, equalTo: musicItemId))
             default:
                 return nil
             }
